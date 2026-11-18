@@ -217,3 +217,39 @@ test('copy-image: a multi-layer body background stays opaque in the PNG', { skip
   assert.equal(r.error, undefined, `the capture succeeded (${JSON.stringify(r)})`);
   assert.equal(r.alpha, 255, `the corner is opaque, so the background was drawn (${JSON.stringify(r)})`);
 });
+
+const CAPTURE_SVG = `(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let svgSrc = null;
+  const origSrc = Object.getOwnPropertyDescriptor(Image.prototype, 'src');
+  Object.defineProperty(Image.prototype, 'src', {
+    set(val) {
+      if (typeof val === 'string' && val.startsWith('data:image/svg+xml')) {
+        svgSrc = decodeURIComponent(val.split(',')[1]);
+      }
+      origSrc.set.call(this, val);
+    },
+    get() { return origSrc.get.call(this); },
+    configurable: true,
+  });
+  const btn = document.querySelector('[data-am="copy-image"]');
+  btn.click();
+  for (let i = 0; i < 200 && !svgSrc; i++) await sleep(50);
+  Object.defineProperty(Image.prototype, 'src', origSrc);
+  if (!svgSrc) return { error: 'svg not captured' };
+  const doc = new DOMParser().parseFromString(svgSrc, 'image/svg+xml');
+  const tableWrap = doc.querySelector('.am-table-wrap');
+  return {
+    found: !!tableWrap,
+    overflow: tableWrap?.style?.overflow ?? null,
+    height: tableWrap?.style?.height ?? null,
+  };
+})()`;
+
+test('copy-image: scrolling containers reset overflow to visible and height to auto in rasterized SVG', { skip: SKIP }, async () => {
+  await load(pathToFileURL(file).href);
+  const r = await evaluate(CAPTURE_SVG);
+  assert.equal(r.found, true, 'table wrap exists in the rendered SVG');
+  assert.equal(r.overflow, 'visible', 'table wrap overflow is reset to visible');
+  assert.equal(r.height, 'auto', 'table wrap height is reset to auto');
+});
